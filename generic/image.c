@@ -2116,9 +2116,9 @@ static inline void image_(drawPixel)(THTensor *output, int y, int x,
   THTensor_(set3d)(output, 1, y, x, cg);
   THTensor_(set3d)(output, 2, y, x, cb);
 #else
-  THTensor_(set3d)(output, 0, y, x, cr / 255);
-  THTensor_(set3d)(output, 1, y, x, cg / 255);
-  THTensor_(set3d)(output, 2, y, x, cb / 255);
+  THTensor_(set3d)(output, 0, y, x, cr / 255.0f);
+  THTensor_(set3d)(output, 1, y, x, cg / 255.0f);
+  THTensor_(set3d)(output, 2, y, x, cb / 255.0f);
 #endif
 }
 static inline void image_(drawChar)(THTensor *output, int x, int y, unsigned char c, int size,
@@ -2216,6 +2216,45 @@ int image_(Main_drawtext)(lua_State *L) {
   return 0;
 }
 
+int image_(Main_drawRect)(lua_State *L) {
+  THTensor *output = (THTensor *)luaT_checkudata(L, 1, torch_Tensor);
+  long x1long = luaL_checklong(L, 2);
+  long y1long = luaL_checklong(L, 3);
+  long x2long = luaL_checklong(L, 4);
+  long y2long = luaL_checklong(L, 5);
+  int lineWidth = luaL_checkint(L, 6);
+  int cr = luaL_checkint(L, 7);
+  int cg = luaL_checkint(L, 8);
+  int cb = luaL_checkint(L, 9);
+
+  int offset = lineWidth / 2;
+  int x1 = (int) MAX(0, x1long - offset - 1);
+  int y1 = (int) MAX(0, y1long - offset - 1);
+  int x2 = (int) MIN(output->size[2] - 1, x2long - offset - 1);
+  int y2 = (int) MIN(output->size[1] - 1, y2long - offset - 1);
+
+  int w = x2 - x1 + 1;
+  int h = y2 - y1 + 1;
+  for (int y = y1; y < y2 + lineWidth; y++) {
+    for (int x = x1; x < x1 + lineWidth; x++) {
+      image_(drawPixel)(output, y, x, cr, cg, cb);
+    }
+    for (int x = x2; x < x2 + lineWidth; x++) {
+      image_(drawPixel)(output, y, x, cr, cg, cb);
+    }
+  }
+  for (int x = x1; x < x2 + lineWidth; x++) {
+    for (int y = y1; y < y1 + lineWidth; y++) {
+      image_(drawPixel)(output, y, x, cr, cg, cb);
+    }
+    for (int y = y2; y < y2 + lineWidth; y++) {
+      image_(drawPixel)(output, y, x, cr, cg, cb);
+    }
+  }
+
+  return 0;
+}
+
 
 static const struct luaL_Reg image_(Main__) [] = {
   {"scaleSimple", image_(Main_scaleSimple)},
@@ -2244,6 +2283,7 @@ static const struct luaL_Reg image_(Main__) [] = {
   {"flip", image_(Main_flip)},
   {"colorize", image_(Main_colorize)},
   {"text", image_(Main_drawtext)},
+  {"drawRect", image_(Main_drawRect)},
   {NULL, NULL}
 };
 

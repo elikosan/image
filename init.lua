@@ -309,6 +309,11 @@ local function savePGM(filename, tensor)
 end
 rawset(image, 'savePGM', savePGM)
 
+function image.getPPMsize(filename)
+   require 'libppm'
+   return torch.Tensor().libppm.size(filename)
+end
+
 local filetypes = {
    jpg = {loader = image.loadJPG, saver = image.saveJPG},
    png = {loader = image.loadPNG, saver = image.savePNG},
@@ -366,6 +371,8 @@ local function load(filename, depth, tensortype)
    local tensor
    if image.is_supported(ext) then
       tensor = filetypes[ext].loader(filename, depth, tensortype)
+   elseif not ext then
+      dok.error('unable to determine image type for file: ' .. filename, 'image.load')
    else
       dok.error('unknown image type: ' .. ext, 'image.load')
    end
@@ -373,6 +380,54 @@ local function load(filename, depth, tensortype)
    return tensor
 end
 rawset(image, 'load', load)
+
+filetypes.jpg.sizer = image.getJPGsize
+filetypes.png.sizer = image.getPNGsize
+filetypes.ppm.sizer = image.getPPMsize
+filetypes.pgm.sizer = image.getPPMsize -- sim. to loadPPM not loadPGM
+
+local function getSize(filename)
+   if not filename then
+      print(dok.usage('image.getSize',
+                       'returns size of image without loading', nil,
+                       {type='string', help='path to file', req=true}))
+      dok.error('missing file name', 'image.getSize')
+   end
+
+   local ext
+
+   local f, err = io.open(filename, 'rb')
+   if not f then
+      error(err)
+   end
+   local hdr = f:read(4) or ''
+   f:close()
+
+   if startswith(hdr, magicJPG) then
+      ext = 'jpg'
+   elseif startswith(hdr, magicPNG) then
+      ext = 'png'
+   elseif hdr:match('^P[25]') then
+      ext = 'pgm'
+   elseif hdr:match('^P[36]') then
+      ext = 'ppm'
+   end
+
+   if not ext then
+      ext = string.match(filename,'%.(%a+)$')
+   end
+   local size
+   if image.is_supported(ext) then
+      size = {filetypes[ext].sizer(filename)}
+   elseif not ext then
+      dok.error('unable to determine image type for file: ' .. filename, 'image.getSize')
+   else
+      dok.error('unknown image type: ' .. ext, 'image.load')
+   end
+
+   return torch.LongTensor(size)
+end
+rawset(image, 'getSize', getSize)
 
 local function save(filename, tensor)
    if not filename or not tensor then
@@ -470,7 +525,7 @@ local function crop(...)
       else
          iwidth,iheight = src:size(2),src:size(1)
       end
-      local x1, x2
+      local x1, y1
       if format == 'c' then
          x1, y1 = math.floor((iwidth-width)/2), math.floor((iheight-height)/2)
       elseif format == 'tl' then
@@ -967,6 +1022,128 @@ local function warp(...)
    return dst
 end
 rawset(image, 'warp', warp)
+
+----------------------------------------------------------------------
+-- affine transform
+--
+local function affinetransform(...)
+   local dst,src,matrix
+   local mode = 'bilinear'
+   local translation = torch.Tensor{0,0}
+   local clamp_mode = 'clamp'
+   local pad_value = 0
+   local args = {...}
+   local nargs = select('#',...)
+   local bad_args = false
+   if nargs == 2 then
+      src = args[1]
+      matrix = args[2]
+   elseif nargs >= 3 then
+      if type(args[3]) == 'string' then
+         -- No destination tensor
+         src = args[1]
+         matrix = args[2]
+         mode = args[3]
+         if nargs >= 4 then translation = args[4] end
+         if nargs >= 5 then clamp_mode = args[5] end
+         if nargs >= 6 then
+           assert(clamp_mode == 'pad', 'pad_value can only be specified if' ..
+                                       ' clamp_mode = "pad"')
+           pad_value = args[6]
+         end
+         if nargs >= 7 then bad_args = true end
+      else
+         -- With Destination tensor
+         dst = args[1]
+         src = args[2]
+         matrix = args[3]
+         if nargs >= 4 then mode = args[4] end
+         if nargs >= 5 then translation = args[5] end
+         if nargs >= 6 then clamp_mode = args[6] end
+         if nargs >= 7 then
+           assert(clamp_mode == 'pad', 'pad_value can only be specified if' ..
+                                       ' clamp_mode = "pad"')
+           pad_value = args[7]
+         end
+         if nargs >= 8 then bad_args = true end
+      end
+   end
+   if bad_args then
+      print(dok.usage('image.warp',
+         'warp an image, according to given affine transform', nil,
+         {type='torch.Tensor', help='input image (KxHxW)', req=true},
+         {type='torch.Tensor', help='(y,x) affine translation matrix', req=true},
+         {type='string', help='mode: lanczos | bicubic | bilinear | simple', default='bilinear'},
+         {type='torch.Tensor', help='extra (y,x) translation to be done before transform', default=torch.Tensor{0,0}},
+         {type='string', help='clamp mode: how to handle interp of samples off the input image (clamp | pad)', default='clamp'},
+         '',
+         {type='torch.Tensor', help='input image (KxHxW)', req=true},
+         {type='torch.Tensor', help='(y,x) affine translation matrix', req=true},
+         {type='string', help='mode: lanczos | bicubic | bilinear | simple', default='bilinear'},
+         {type='torch.Tensor', help='extra (y,x) translation to be done before transform', default=torch.Tensor{0,0}},
+         {type='string', help='clamp mode: how to handle interp of samples off the input image (clamp | pad)', default='clamp'},
+         {type='number', help='pad value: value to pad image. Can only be set when clamp mode equals "pad"', default=0}))
+      dok.error('incorrect arguments', 'image.warp')
+   end
+   -- This is a little messy, but convert mode string to an enum
+   if (mode == 'simple') then
+      mode = 0
+   elseif (mode == 'bilinear') then
+      mode = 1
+   elseif (mode == 'bicubic') then
+      mode = 2
+   elseif (mode == 'lanczos') then
+      mode = 3
+   else
+      dok.error('Incorrect arguments (mode is not lanczos | bicubic | bilinear | simple)!', 'image.warp')
+   end
+   if (clamp_mode == 'clamp') then
+      clamp_mode = 0
+   elseif (clamp_mode == 'pad') then
+      clamp_mode = 1
+   else
+      dok.error('Incorrect arguments (clamp_mode is not clamp | pad)!', 'image.warp')
+   end
+
+   local dim2 = false
+   if src:nDimension() == 2 then
+      dim2 = true
+      src = src:reshape(1,src:size(1),src:size(2))
+   end
+   dst = dst or src.new()
+   dst:resize(src:size(1), src:size(2), src:size(3))
+
+   -- create field
+   local height = src:size(2)
+   local width = src:size(3)
+
+   local grid_y = torch.ger( torch.linspace(-1,1,height), torch.ones(width) )
+   local grid_x = torch.ger( torch.ones(height), torch.linspace(-1,1,width) )
+
+   local grid_xy = torch.Tensor()
+   grid_xy:resize(2,height,width)
+   grid_xy[1] = grid_y * ((height-1)/2) * -1
+   grid_xy[2] = grid_x * ((width-1)/2) * -1
+   local view_xy = grid_xy:reshape(2,height*width)
+
+   local matrix = matrix:typeAs(torch.Tensor()) -- coerce matrix to default tensor type
+   local field = torch.mm(matrix, view_xy)
+   field = (grid_xy - field:reshape( 2, height, width ))
+
+   -- offset field for translation
+   translation = torch.Tensor(translation)
+   field[1] = field[1] - translation[1]
+   field[2] = field[2] - translation[2]
+
+
+   local offset_mode = true
+   src.image.warp(dst, src, field, mode, offset_mode, clamp_mode, pad_value)
+   if dim2 then
+      dst = dst[1]
+   end
+   return dst
+end
+rawset(image, 'affinetransform', affinetransform)
 
 ----------------------------------------------------------------------
 -- hflip
@@ -1485,7 +1662,7 @@ rawset(image, 'window', window)
 -- lena is always useful
 --
 local function lena()
-   local fname = 'lena'
+   local fname = 'grace_hopper_512'
    if xlua.require 'libjpeg' then
       lena = image.load(paths.concat(fpath(), 'assets', fname .. '.jpg'), 3)
    elseif xlua.require 'libpng' then
@@ -1975,6 +2152,27 @@ function image.drawText(src, text, x, y, opts)
 		   opts.wrap and 1 or 0)
     return out
 end
+
+----------------------------------------------------------------------
+--- Draw a rectangle on the image
+--
+-- color, bgcolor, size, wrap, inplace
+function image.drawRect(src, x1, y1, x2, y2, opts)
+   opts = opts or {}
+   assert(torch.isTensor(src) and src:dim() == 3 and src:size(1) == 3,
+    "input image has to be a 3D tensor of shape 3 x H x W ")
+   local out = src
+   if not opts.inplace then
+      out = src:clone()
+   end
+   if not (x1 and x2 and y1 and y2) then return out end
+   local color = opts.color or {255, 0, 0} -- red default
+   local lineWidth = opts.lineWidth or 1
+
+   src.image.drawRect(out, x1, y1, x2, y2, lineWidth, color[1], color[2], color[3])
+   return out
+end
+
 
 ----------------------------------------------------------------------
 --- Returns a gaussian kernel.

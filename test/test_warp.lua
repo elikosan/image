@@ -32,8 +32,8 @@ flow_scale[1] = grid_y
 flow_scale[2] = grid_x
 flow_scale[1]:add(1):mul(0.5) -- 0 to 1
 flow_scale[2]:add(1):mul(0.5) -- 0 to 1
-flow_scale[1]:mul(height)
-flow_scale[2]:mul(width)
+flow_scale[1]:mul(height-1)
+flow_scale[2]:mul(width-1)
 flow:add(flow_scale)
 
 t0 = sys.clock()
@@ -86,8 +86,8 @@ flow_scale[1] = grid_y
 flow_scale[2] = grid_x
 flow_scale[1]:add(1):mul(0.5) -- 0 to 1
 flow_scale[2]:add(1):mul(0.5) -- 0 to 1
-flow_scale[1]:mul(height)
-flow_scale[2]:mul(width)
+flow_scale[1]:mul(height-1)
+flow_scale[2]:mul(width-1)
 flow:add(flow_scale)
 
 flow_rot = torch.FloatTensor()
@@ -137,3 +137,10 @@ image.display{image = im_lanczos, zoom = 4, legend = 'rotation lanczos (pad 1)'}
 
 image.display{image = im, zoom = 4, legend = 'source image'}
 
+-- ***********************************************
+-- NOW MAKE SURE BOTH FLOAT AND DOUBLE INPUTS WORK
+-- ***********************************************
+
+mtx = torch.zeros(2, 32, 32)
+out = image.warp(im:float(), mtx:float(), 'bilinear')
+out = image.warp(im:double(), mtx:double(), 'bilinear')

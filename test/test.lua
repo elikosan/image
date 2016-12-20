@@ -327,7 +327,7 @@ end
 --
 function test.CompareLoadAndDecompress()
   -- This test breaks if someone removes lena from the repo
-  local imfile = getTestImagePath('lena.jpg')
+  local imfile = getTestImagePath('grace_hopper_512.jpg')
   if not paths.filep(imfile) then
     error(imfile .. ' is missing!')
   end
@@ -465,7 +465,7 @@ end
 local function testByteTensorRoundtrip(forward, backward, cond, msg)
   local lena = toByteImage(image.lena())
   local expected = lena
-  local actual = backward(forward(expected))
+  local actual = backward(forward(expected))  
   assertByteTensorEq(actual, expected, cond, msg)
 end
 
@@ -480,7 +480,7 @@ end
 function test.rgb2hsvByteTensor()
   testFunctionOnByteTensor(image.rgb2hsv, 'image.rgb2hsv error for ByteTensor')
   testFunctionOnByteTensor(image.hsv2rgb, 'image.hsv2rgb error for ByteTensor')
-  testByteTensorRoundtrip(image.rgb2hsv, image.hsv2rgb, 2,
+  testByteTensorRoundtrip(image.rgb2hsv, image.hsv2rgb, 3,
                           'image.rgb2hsv roundtrip error for ByteTensor')
 end
 
@@ -635,6 +635,17 @@ function test.test_pbmload()
 end
 
 ----------------------------------------------------------------------
+-- Load unknown image type without extension test
+--
+function test.LoadUnknownImageTypeWithoutExtension()
+  tester:assertErrorPattern(
+    function() image.load(getTestImagePath("bmp-without-ext")) end,
+    "unable to determine image type for file",
+    "unknown image type should not be loaded or unexpected error message"
+  )
+end
+
+----------------------------------------------------------------------
 -- Text drawing test
 --
 function test.test_textdraw()
@@ -652,6 +663,26 @@ function test.test_textdraw()
   end
 end
 
+----------------------------------------------------------------------
+-- Text drawing rect
+--
+function test.test_drawRect()
+  local types = {
+     ["torch.ByteTensor"]   = "byte",
+     ["torch.DoubleTensor"] = "double",
+     ["torch.FloatTensor"]  = "float"
+  }
+  for k,v in pairs(types) do
+    local bg = torch.zeros(3, 24, 12):type(k)
+    if k == 'torch.ByteTensor' then
+      bg:fill(3)
+    else
+      bg:fill(3/255)
+    end
+    local img = image.drawRect(bg, 5, 5, 10, 20, {color={255, 0, 255}})
+    checkPNG(getTestImagePath("rectangle.png"), 3, v, img)
+  end
+end
 
 function image.test(tests, seed)
    local defaultTensorType = torch.getdefaulttensortype()
