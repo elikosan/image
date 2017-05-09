@@ -27,6 +27,7 @@
 --
 -- history:
 --     July  1, 2011, 7:42PM - import from Torch5 - Clement Farabet
+--     2017-05-04
 ----------------------------------------------------------------------
 
 require 'torch'
