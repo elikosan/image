@@ -149,7 +149,7 @@ local function processPNG(img, depth, bit_depth, tensortype)
 end
 
 local function loadPNG(filename, depth, tensortype)
-   if not xlua.require 'libpng' then
+   if not xlua.require 'liblua_png' then
       dok.error('libpng package not found, please install libpng','image.loadPNG')
    end
    local load_from_file = 1
@@ -169,16 +169,17 @@ local function clampImage(tensor)
 end
 
 local function savePNG(filename, tensor)
-   if not xlua.require 'libpng' then
+   if not xlua.require 'liblua_png' then
       dok.error('libpng package not found, please install libpng','image.savePNG')
    end
    tensor = clampImage(tensor)
-   tensor.libpng.save(filename, tensor)
+   local save_to_file = 1
+   tensor.libpng.save(filename, tensor, save_to_file)
 end
 rawset(image, 'savePNG', savePNG)
 
 local function decompressPNG(tensor, depth, tensortype)
-    if not xlua.require 'libpng' then
+    if not xlua.require 'liblua_png' then
         dok.error('libpng package not found, please install libpng',
                   'image.decompressPNG')
     end
@@ -197,11 +198,25 @@ end
 rawset(image, 'decompressPNG', decompressPNG)
 
 function image.getPNGsize(filename)
-   if not xlua.require 'libpng' then
+   if not xlua.require 'liblua_png' then
       dok.error('libpng package not found, please install libpng','image.getPNGsize')
    end
    return torch.Tensor().libpng.size(filename)
 end
+
+local function compressPNG(tensor)
+   if not xlua.require 'liblua_png' then
+      dok.error('libpng package not found, please install libpng',
+         'image.compressPNG')
+   end
+   tensor = clampImage(tensor)
+   local b = torch.ByteTensor()
+   local save_to_file = 0
+   tensor.libpng.save("", tensor, save_to_file, b)
+   return b
+end
+rawset(image, 'compressPNG', compressPNG)
+
 
 local function processJPG(img, depth, tensortype)
    local MAXVAL = 255
@@ -1473,7 +1488,9 @@ local function toDisplayTensor(...)
       for y = 1,ymaps do
          for x = 1,xmaps do
             if k > nmaps then break end
-            grid:narrow(2,(y-1)*height+1+padding/2,height-padding):narrow(3,(x-1)*width+1+padding/2,width-padding):copy(packed[k])
+            grid:narrow(2, math.floor((y-1)*height+1+padding/2), math.floor(height-padding))
+                :narrow(3, math.floor((x-1)*width+1+padding/2), math.floor(width-padding))
+                :copy(packed[k])
             k = k + 1
          end
       end
@@ -1493,7 +1510,9 @@ local function toDisplayTensor(...)
       for y = 1,ymaps do
          for x = 1,xmaps do
             if k > nmaps then break end
-            grid:narrow(1,(y-1)*height+1+padding/2,height-padding):narrow(2,(x-1)*width+1+padding/2,width-padding):copy(packed[k])
+            grid:narrow(1, math.floor((y-1)*height+1+padding/2),math.floor(height-padding))
+                :narrow(2,math.floor((x-1)*width+1+padding/2),math.floor(width-padding))
+                :copy(packed[k])
             k = k + 1
          end
       end
@@ -1665,7 +1684,7 @@ local function lena()
    local fname = 'grace_hopper_512'
    if xlua.require 'libjpeg' then
       lena = image.load(paths.concat(fpath(), 'assets', fname .. '.jpg'), 3)
-   elseif xlua.require 'libpng' then
+   elseif xlua.require 'liblua_png' then
       lena = image.load(paths.concat(fpath(), 'assets', fname .. '.png'), 3)
    else
       dok.error('no bindings available to load images (libjpeg AND libpng missing)', 'image.lena')
@@ -1684,7 +1703,7 @@ local function fabio()
    local fname = 'fabio'
    if xlua.require 'libjpeg' then
       lena = image.load(paths.concat(fpath(), 'assets', fname .. '.jpg'), 1)
-   elseif xlua.require 'libpng' then
+   elseif xlua.require 'liblua_png' then
       lena = image.load(paths.concat(fpath(), 'assets', fname .. '.png'), 1)
    else
       dok.error('no bindings available to load images (libjpeg AND libpng missing)', 'image.fabio')
